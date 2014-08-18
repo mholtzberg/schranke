@@ -23,8 +23,9 @@
  * THE SOFTWARE.
  */
 
+#include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <libopencm3/stm32/rcc.h>
@@ -35,10 +36,16 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/spi.h>
 
-#include <eadog.h>
-#include <glib.h>
+#include <liblcd/eadog.h>
+#include <liblcd/glib.h>
 
 #include "./fonts/fonts.h"
+
+#include "boom.h"
+#include "debug.h"
+#include "gsm.h"
+#include "gui.h"
+#include "timer.h"
 
 #define EADOG_SPI         SPI2
 #define EADOG_RESET_PIN   GPIO9
@@ -46,6 +53,9 @@
 #define EADOG_A0_PIN      GPIO10
 #define EADOG_A0_PORT     GPIOB
 
+#define USART_CONSOLE     USART1
+
+/* SPI driver prototypes */
 static void eadog_reset(void *priv, bool enable);
 static void eadog_data(void *priv, bool enable);
 static void eadog_write(void *priv, const uint8_t *data, size_t len);
@@ -89,7 +99,9 @@ static void eadog_write(void *priv, const uint8_t *data, size_t len)
 static void gpio_setup(void)
 {
     /* Enable GPIOB clock. */
-    rcc_peripheral_enable_clock(&RCC_APB2ENR, RCC_APB2ENR_IOPBEN);
+    rcc_periph_clock_enable(RCC_GPIOB);
+
+    rcc_periph_clock_enable(RCC_GPIOA);
 
     /* A0 of EADOG */
     gpio_set_mode(EADOG_A0_PORT, GPIO_MODE_OUTPUT_50_MHZ,
@@ -105,13 +117,14 @@ static void gpio_setup(void)
                   GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO13);
     gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_50_MHZ,
                   GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO15);
+
 }
 
 static void spi_setup(void)
 {
     /* The EADOG display is connected to SPI2, so initialise it. */
 
-    rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_SPI2EN);
+    rcc_periph_clock_enable(RCC_SPI2);
 
     spi_set_unidirectional_mode(EADOG_SPI);       /* We want to send only. */
     spi_disable_crc(EADOG_SPI);                   /* No CRC for this slave. */
@@ -139,6 +152,37 @@ static void spi_setup(void)
     spi_enable(EADOG_SPI);
 }
 
+static void usart_setup(void)
+{
+    gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_50_MHZ,
+                  GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO_USART1_TX);
+
+    rcc_periph_clock_enable(RCC_USART1);
+
+    usart_set_baudrate(USART_CONSOLE, 115200);
+    usart_set_databits(USART_CONSOLE, 8);
+    usart_set_stopbits(USART_CONSOLE, USART_STOPBITS_1);
+    usart_set_mode(USART_CONSOLE, USART_MODE_TX);
+    usart_set_parity(USART_CONSOLE, USART_PARITY_NONE);
+    usart_set_flow_control(USART_CONSOLE, USART_FLOWCONTROL_NONE);
+
+    /* Finally enable the USART. */
+    usart_enable(USART_CONSOLE);
+}
+
+void dbg(const char *fmt, ...)
+{
+    va_list args;
+    char buf[64];
+    const char *p = buf;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    while (*p != '\0') {
+        usart_send_blocking(USART_CONSOLE, *p++);
+    }
+    va_end(args);
+}
+
 int main(void)
 {
     struct eadog eadog = {
@@ -147,23 +191,27 @@ int main(void)
         .write = eadog_write
     };
 
-    struct glib_dev gdev;
+    struct glib_ctx gdev;
 
     rcc_clock_setup_in_hse_8mhz_out_24mhz();
 
     gpio_setup();
+    usart_setup();
     spi_setup();
 
-    eadog_init(&eadog, NULL);
-    glib_init(&gdev, (struct glib_lcd*)&eadog);
+    timer_init();
+    gsm_init();
+    boom_init();
 
-    glib_font_set(&gdev, &font_ubuntu12);
-    glib_print(&gdev, 0, 12, "Hello World!");
-    glib_print(&gdev, 0, 24, "Привет мир!");
-    glib_flush(&gdev);
+    eadog_init(&eadog, NULL);
+    glib_init(&gdev, (struct glib_dev*)&eadog);
+
+    gui_init(&gdev);
 
     for (;;) {
-        __asm__("nop");
+        boom_process();
+        gui_process();
+        gsm_process();
     }
 
     return 0;

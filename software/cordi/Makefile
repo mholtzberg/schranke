@@ -19,16 +19,25 @@
 
 BINARY = main
 
-LIBLCD = ../liblcd/liblcd
+LIBLCD = ../liblcd
 
-OBJS = ./fonts/font_ubuntu12.o \
-	$(LIBLCD)/glib.o \
-	$(LIBLCD)/eadog.o
+OBJS =  \
+	./fonts/font_courier10.o \
+	$(LIBLCD)/liblcd/glib.o \
+	$(LIBLCD)/liblcd/eadog.o \
+	$(LIBLCD)/liblcd/page.o \
+	$(LIBLCD)/liblcd/page_menu.o \
+	$(LIBLCD)/liblcd/page_action.o \
+	timer.o \
+	boom.o \
+	gui.o \
+	gsm.o \
+	ring.o
 
 LIBNAME		= opencm3_stm32f1
 DEFS		= -DSTM32F1
 
-CPPFLAGS        = -I$(LIBLCD)
+CPPFLAGS        = -I$(LIBLCD) -I.
 
 FP_FLAGS	?= -msoft-float
 ARCH_FLAGS	= -mthumb -mcpu=cortex-m3 $(FP_FLAGS) -mfix-cortex-m3-ldrd
