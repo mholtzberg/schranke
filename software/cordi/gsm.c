@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/gpio.h>
@@ -35,6 +36,8 @@
 #include "boom.h"
 #include "debug.h"
 #include "ring.h"
+#include "settings.h"
+#include "rtc.h"
 #include "timer.h"
 #include "gsm.h"
 
@@ -56,9 +59,19 @@ enum gsm_state {
     STATE_READSMSNUMBER,
     STATE_READSMSTEXT,
     STATE_DELETESMS,
+    STATE_SENDSMS,
+    STATE_WAITOK,
     STATE_IDLE
 };
 
+struct gsm_sms {
+    struct gsm_sms *next;
+    char recipient[16];
+    char msg[160];
+};
+
+
+static struct gsm_sms *g_sms_list = NULL;
 static enum gsm_state g_state;
 static struct timer g_timer;
 
@@ -75,7 +88,7 @@ static void gsm_write(const char *fmt, ...)
     size_t len;
 
     va_start(args, fmt);
-    len = vsnprintf(buf, sizeof(buf), fmt, args);
+    len = vsniprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
     if (len >= sizeof(buf))
@@ -106,11 +119,53 @@ static const char *gsm_getline(void)
         dbg("\n");
         /* Overwrite CR */
 
-        line[pos-1] = '\0';
+        if (pos > 0)
+            line[pos-1] = '\0';
+        else
+            line[0] = '\0';
+
         pos = 0;
         return line;
     } else {
         return NULL;
+    }
+}
+
+static void gsm_setsched(const char *line)
+{
+    struct tm open;
+    struct tm close;
+
+    memset(&open, 0, sizeof(open));
+    memset(&close, 0, sizeof(close));
+
+    if (siscanf(line, "!%d:%d-%d:%d",
+                  &open.tm_hour, &open.tm_min,
+                  &close.tm_hour, &close.tm_min) == 4) {
+        settings_setopen(&open);
+        settings_setclose(&close);
+        settings_save();
+        dbg("saved\n");
+    }
+}
+
+static void gsm_status(void)
+{
+    static struct gsm_sms sms;
+    struct gsm_sms *s;
+
+    memset(&sms, 0, sizeof(sms));
+
+    sniprintf(sms.recipient, sizeof(sms.recipient), "+4917624347476");
+    sniprintf(sms.msg, sizeof(sms.msg), "Hallo");
+
+    if (g_sms_list == NULL) {
+        g_sms_list = &sms;
+    } else {
+        s = g_sms_list;
+        while (s->next != NULL)
+            s = s->next;
+        s->next = &sms;
     }
 }
 
@@ -169,8 +224,12 @@ void gsm_init()
 
 void gsm_process()
 {
-    const char *line = gsm_getline();
+    const char *line;
     static int smsid;
+    static char sender[16];
+    static struct tm tm;
+
+    int c;
 
     switch (g_state) {
     case STATE_RESET:
@@ -193,7 +252,8 @@ void gsm_process()
         break;
 
     case STATE_STARTUP:
-        if (line && strcmp(line, "OK") == 0) {
+
+        if ((line = gsm_getline()) && strcmp(line, "OK") == 0) {
             g_state = STATE_SETPIN;
         } else if (timer_expired(&g_timer)) {
             gsm_write("AT\r");
@@ -211,7 +271,7 @@ void gsm_process()
         break;
 
     case STATE_SETPINOK:
-        if (line && strcmp(line, "OK") == 0) {
+        if ((line = gsm_getline()) && strcmp(line, "OK") == 0) {
             g_state = STATE_IDLE;
         } else if (timer_expired(&g_timer)) {
             gpio_clear(GSM_PORT, GSM_PWR_PIN);
@@ -220,29 +280,56 @@ void gsm_process()
         }
         break;
 
+    case STATE_WAITOK:
+        if ((line = gsm_getline()) && strcmp(line, "OK") == 0) {
+            g_state = STATE_IDLE;
+        }
+        break;
+
     case STATE_IDLE:
-        if (line && sscanf(line, "+CMTI: \"SM\", %d", &smsid) == 1) {
+        if ((line = gsm_getline()) &&
+            siscanf(line, "+CMTI: \"SM\", %d", &smsid) == 1) {
+
             gsm_write("AT+CMGR=%d\r\n", smsid);
             g_state = STATE_READSMSNUMBER;
+        } else if (g_sms_list != NULL) {
+
+            gsm_write("AT+CMGS=\"%s\"\r", g_sms_list->recipient);
+
+            g_state = STATE_SENDSMS;
         }
         break;
 
     case STATE_READSMSNUMBER:
-        if (line && strncmp(line, "+CMGR", 5) == 0) {
+        memset(&tm, 0, sizeof(tm));
+
+        if ((line = gsm_getline()) &&
+            siscanf(line, "+CMGR: \"REC UNREAD\",\"%16[0-9+]\",\"\",\"%d/%d/%d,%d:%d:%d",
+                   sender,
+                   &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                   &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 7) {
+
+            tm.tm_year += 2000;
+            tm.tm_year -= 1900;
+            tm.tm_mon -= 1;
+
+            /* May extract sender number if needed */
             g_state = STATE_READSMSTEXT;
         }
         break;
 
     case STATE_READSMSTEXT:
-        if (line) {
+        if ((line = gsm_getline())) {
             if (strcasecmp(line, "auf") == 0) {
-                dbg("AUF\r\n");
                 boom_open();
             } else if (strcasecmp(line, "zu") == 0) {
-                dbg("ZU\r\n");
                 boom_close();
+            } else if (strcmp(line, "?") == 0) {
+                gsm_status();
+            } else if (strncmp(line, "!", 1) == 0) {
+                rtc_set(mktime(&tm));
+                gsm_setsched(line);
             }
-
 
             g_state = STATE_DELETESMS;
         }
@@ -250,11 +337,21 @@ void gsm_process()
         break;
 
     case STATE_DELETESMS:
-        if (line && strcmp(line, "OK") == 0) {
-            gsm_write("AT+CMGD=%d\r\n", smsid);
-            g_state = STATE_IDLE;
+        if ((line = gsm_getline()) && strcmp(line, "OK") == 0) {
+            gsm_write("AT+CMGD=1,4\r\n", smsid);
+            g_state = STATE_WAITOK;
         }
         break;
+
+    case STATE_SENDSMS:
+        if ((c = ring_deq(&g_inbuf)) >= 0 && c == '>') {
+            gsm_write("%s\x1a", g_sms_list->msg);
+
+            /* Don't forget to remove from list */
+            g_sms_list = g_sms_list->next;
+
+            g_state = STATE_WAITOK;
+        }
 
     }
 }

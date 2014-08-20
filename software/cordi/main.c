@@ -45,6 +45,8 @@
 #include "debug.h"
 #include "gsm.h"
 #include "gui.h"
+#include "rtc.h"
+#include "settings.h"
 #include "timer.h"
 
 #define EADOG_SPI         SPI2
@@ -176,7 +178,7 @@ void dbg(const char *fmt, ...)
     char buf[64];
     const char *p = buf;
     va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    vsniprintf(buf, sizeof(buf), fmt, args);
     while (*p != '\0') {
         usart_send_blocking(USART_CONSOLE, *p++);
     }
@@ -192,6 +194,8 @@ int main(void)
     };
 
     struct glib_ctx gdev;
+    struct timer timer;
+    time_t time;
 
     rcc_clock_setup_in_hse_8mhz_out_24mhz();
 
@@ -199,16 +203,28 @@ int main(void)
     usart_setup();
     spi_setup();
 
+    settings_init();
     timer_init();
     gsm_init();
     boom_init();
+    rtc_init();
 
     eadog_init(&eadog, NULL);
     glib_init(&gdev, (struct glib_dev*)&eadog);
 
     gui_init(&gdev);
 
+    timer_set(&timer, 2000);
+
+    time = 0;
+
     for (;;) {
+        if (timer_expired(&timer)) {
+            time = rtc_time();
+            dbg("time: %s", ctime(&time));
+
+            timer_set(&timer, 2000);
+        }
         boom_process();
         gui_process();
         gsm_process();

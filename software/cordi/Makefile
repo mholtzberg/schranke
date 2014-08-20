@@ -32,7 +32,9 @@ OBJS =  \
 	boom.o \
 	gui.o \
 	gsm.o \
-	ring.o
+	ring.o \
+	rtc.o \
+	settings.o
 
 LIBNAME		= opencm3_stm32f1
 DEFS		= -DSTM32F1
