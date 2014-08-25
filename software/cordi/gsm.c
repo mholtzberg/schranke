@@ -48,7 +48,7 @@
 
 #define GSM_USART         USART2
 
-#define GSM_TIMEOUT       1000       /* 1000 ms */
+#define GSM_TIMEOUT       2000       /* 2000 ms */
 #define GSM_STATE_TIMEOUT 10000      /* 10 sec */
 
 enum gsm_state {
@@ -360,11 +360,11 @@ void gsm_process()
 
     case STATE_READSMSTEXT:
         if ((line = gsm_getline())) {
-            if (strcasecmp(line, "auf") == 0) {
+            if (strncasecmp(line, "auf", 2) == 0) {
                 boom_open();
-            } else if (strcasecmp(line, "zu") == 0) {
+            } else if (strncasecmp(line, "zu", 2) == 0) {
                 boom_close();
-            } else if (strcmp(line, "?") == 0) {
+            } else if (strncmp(line, "?", 1) == 0) {
                 gsm_status();
             } else if (strncmp(line, "!", 1) == 0) {
                 rtc_set(mktime(&tm));

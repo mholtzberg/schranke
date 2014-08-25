@@ -33,6 +33,7 @@
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/iwdg.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/spi.h>
 
@@ -194,14 +195,17 @@ int main(void)
     };
 
     struct glib_ctx gdev;
-    struct timer timer;
-    time_t time;
 
     rcc_clock_setup_in_hse_8mhz_out_24mhz();
+
+    iwdg_set_period_ms(1000);
+    iwdg_start();
 
     gpio_setup();
     usart_setup();
     spi_setup();
+
+    dbg("Start\n");
 
     settings_init();
     timer_init();
@@ -214,17 +218,8 @@ int main(void)
 
     gui_init(&gdev);
 
-    timer_set(&timer, 2000);
-
-    time = 0;
-
     for (;;) {
-        if (timer_expired(&timer)) {
-            time = rtc_time();
-            dbg("time: %s", ctime(&time));
-
-            timer_set(&timer, 2000);
-        }
+        iwdg_reset();
         boom_process();
         gui_process();
         gsm_process();
