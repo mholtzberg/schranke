@@ -14,6 +14,8 @@ static struct settings {
     bool invalid;
     struct tm open;
     struct tm close;
+    int up;
+    int down;
 } g_settings;
 
 static int flash_write(uint32_t start_address, uint8_t *input_data, uint16_t num_elements)
@@ -103,3 +105,19 @@ void settings_getclose(struct tm *time)
     memcpy(time, &g_settings.close, sizeof(*time));
 }
 
+void settings_setcal(int up, int down)
+{
+    g_settings.up   = up;
+    g_settings.down = down;
+}
+
+void settings_getcal(int *up, int *down)
+{
+    if (g_settings.invalid) {
+        *up   = -1;
+        *down = -1;
+    } else {
+        *up   = g_settings.up;
+        *down = g_settings.down;
+    }
+}

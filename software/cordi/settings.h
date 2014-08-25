@@ -9,5 +9,7 @@ void settings_getopen(struct tm *time);
 void settings_setopen(struct tm *time);
 void settings_getclose(struct tm *time);
 void settings_setclose(struct tm *time);
+void settings_setcal(int up, int down);
+void settings_getcal(int *up, int *down);
 
 #endif  /* _SETTINGS_H_ */

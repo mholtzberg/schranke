@@ -28,11 +28,13 @@
 #include <libopencm3/stm32/rcc.h>
 
 #include "debug.h"
+#include "settings.h"
 #include "timer.h"
 #include "boom.h"
 
-#define BOOM_INTERVAL       500    /* 500 ms */
-#define BOOM_TIMEOUT        10000  /* Move boom for maximum 10 seconds */
+#define BOOM_INTERVAL      500    /* 500 ms */
+#define BOOM_TIMEOUT       10000  /* Move boom for maximum 10 seconds */
+#define BOOM_FLASH_TIME    5000   /* 5 sec flash light before opening / closing */
 
 #define BOOM_PWR_PORT      GPIOA
 #define BOOM_PWR_PIN       GPIO5
@@ -48,6 +50,7 @@
 #endif
 
 enum state {
+    STATE_FLASH,
     STATE_OPENING,
     STATE_CLOSING,
     STATE_OPENED,
@@ -66,6 +69,7 @@ static enum state g_state = STATE_CLOSED;
 
 static struct timer g_timer;
 static struct timer g_timeout;
+static struct timer g_flash_timer;
 
 static void adc_setup(void)
 {
@@ -104,7 +108,7 @@ static uint16_t adc_read(void)
     return reg16;
 }
 
-static void boom_signal_set(bool on)
+static void boom_flash_set(bool on)
 {
     if (on)
         gpio_set(BOOM_SIG_PORT, BOOM_SIG_PIN);
@@ -114,8 +118,6 @@ static void boom_signal_set(bool on)
 
 static void motor_pwr_set(bool on)
 {
-    boom_signal_set(on);
-
     if (on)
         gpio_set(BOOM_PWR_PORT, BOOM_PWR_PIN);
     else
@@ -142,7 +144,7 @@ void boom_init()
     gpio_set_mode(BOOM_SIG_PORT, GPIO_MODE_OUTPUT_50_MHZ,
                   GPIO_CNF_OUTPUT_PUSHPULL, BOOM_SIG_PIN);
 
-
+    settings_getcal(&g_adc_opened, &g_adc_closed);
     timer_set(&g_timer, BOOM_INTERVAL);
 }
 
@@ -182,8 +184,36 @@ void boom_process()
         timer_set(&g_timer, BOOM_INTERVAL);
 
         switch (g_state) {
+        case STATE_FLASH:
+            boom_flash_set(true);
+
+            if (timer_expired(&g_flash_timer)) {
+                timer_set(&g_timeout, BOOM_TIMEOUT);
+
+                switch (g_dest) {
+                case STATE_CALUP:
+                    g_state = STATE_CALUP;
+                    last_adc = 0;
+                    motor_dir_set(false);
+                    break;
+
+                case STATE_CLOSED:
+                    motor_dir_set(true);
+                    g_state = STATE_CLOSING;
+                    break;
+
+                case STATE_OPENED:
+                    motor_dir_set(false);
+                    g_state = STATE_OPENING;
+                    break;
+
+                default:
+                    ;
+                }
+            }
+            break;
+
         case STATE_OPENING:
-            boom_signal_set(true);
             if (adc_read() > g_adc_opened || timer_expired(&g_timeout)) {
                 motor_pwr_set(false);
                 g_state = STATE_OPENED;
@@ -193,17 +223,12 @@ void boom_process()
             break;
 
         case STATE_OPENED:
-            if (g_dest == STATE_CLOSED) {
-                timer_set(&g_timeout, BOOM_TIMEOUT);
-                motor_dir_set(true);
-                g_state = STATE_CLOSING;
-            } else if (g_dest == STATE_CALUP) {
-                g_state = STATE_CALUP;
-                last_adc = 0;
-                motor_dir_set(false);
-                timer_set(&g_timeout, BOOM_TIMEOUT);
+            if (g_dest == STATE_CLOSED || g_dest == STATE_CALUP) {
+                timer_set(&g_flash_timer, BOOM_FLASH_TIME);
+                g_state = STATE_FLASH;
             } else {
                 motor_dir_set(false);
+                boom_flash_set(false);
             }
             break;
 
@@ -217,17 +242,12 @@ void boom_process()
             break;
 
         case STATE_CLOSED:
-            if (g_dest == STATE_OPENED) {
-                timer_set(&g_timeout, BOOM_TIMEOUT);
-                motor_dir_set(false);
-                g_state = STATE_OPENING;
-            } else if (g_dest == STATE_CALUP) {
-                g_state = STATE_CALUP;
-                last_adc = 0;
-                motor_dir_set(false);
-                timer_set(&g_timeout, BOOM_TIMEOUT);
+            if (g_dest == STATE_OPENED || g_dest == STATE_CALUP) {
+                timer_set(&g_flash_timer, BOOM_FLASH_TIME);
+                g_state = STATE_FLASH;
             } else {
                 motor_dir_set(false);
+                boom_flash_set(false);
             }
             break;
 
@@ -262,6 +282,10 @@ void boom_process()
 
                 g_adc_closed = adc + BOOM_CAL_DELTA;
                 motor_pwr_set(false);
+
+                settings_setcal(g_adc_opened, g_adc_closed);
+                settings_save();
+
                 g_state = STATE_CLOSED;
             }
             last_adc = adc;
