@@ -42,13 +42,14 @@
 #include "gsm.h"
 
 
-#define GSM_PORT      GPIOA
-#define GSM_PWR_PIN   GPIO12
-#define GSM_RST_PIN   GPIO13
+#define GSM_PORT          GPIOA
+#define GSM_PWR_PIN       GPIO12
+#define GSM_RST_PIN       GPIO13
 
-#define GSM_USART     USART2
+#define GSM_USART         USART2
 
-#define GSM_TIMEOUT  1000       /* 1000 ms */
+#define GSM_TIMEOUT       1000       /* 1000 ms */
+#define GSM_STATE_TIMEOUT 10000      /* 10 sec */
 
 enum gsm_state {
     STATE_RESET,
@@ -74,6 +75,7 @@ struct gsm_sms {
 static struct gsm_sms *g_sms_list = NULL;
 static enum gsm_state g_state;
 static struct timer g_timer;
+static struct timer g_state_timer;
 
 static struct ring g_outbuf;
 static struct ring g_inbuf;
@@ -192,6 +194,16 @@ static void gsm_status(void)
     }
 }
 
+static void gsm_reset(void)
+{
+    g_state = STATE_RESET;
+    gpio_clear(GSM_PORT, GSM_PWR_PIN);
+    gpio_set(GSM_PORT, GSM_RST_PIN);
+
+    timer_set(&g_timer, GSM_TIMEOUT);
+    timer_set(&g_state_timer, GSM_STATE_TIMEOUT);
+}
+
 void gsm_init()
 {
     /* Setup Reset and Power pins */
@@ -237,12 +249,7 @@ void gsm_init()
 
     usart_enable(GSM_USART);
 
-    g_state = STATE_RESET;
-
-    gpio_clear(GSM_PORT, GSM_PWR_PIN);
-    gpio_set(GSM_PORT, GSM_RST_PIN);
-
-    timer_set(&g_timer, GSM_TIMEOUT);
+    gsm_reset();
 }
 
 void gsm_process()
@@ -251,6 +258,16 @@ void gsm_process()
     static int smsid;
     static char sender[16];
     static struct tm tm;
+    static enum gsm_state last_state = STATE_RESET;
+
+    if (last_state != g_state || g_state == STATE_IDLE) {
+        timer_set(&g_state_timer, GSM_STATE_TIMEOUT);
+        last_state = g_state;
+    }
+
+    if (timer_expired(&g_state_timer)) {
+        gsm_reset();
+    }
 
     int c;
 
