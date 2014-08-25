@@ -30,6 +30,7 @@ void boom_init(void);
 void boom_process(void);
 
 void boom_open(void);
+bool boom_isopen(void);
 void boom_close(void);
 void boom_calibrate(void);
 void boom_emergency(void);

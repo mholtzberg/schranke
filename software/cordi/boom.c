@@ -34,10 +34,12 @@
 #define BOOM_INTERVAL       500    /* 500 ms */
 #define BOOM_TIMEOUT        10000  /* Move boom for maximum 10 seconds */
 
-#define MOTOR_PWR_PORT      GPIOA
-#define MOTOR_PWR_PIN       GPIO5
-#define MOTOR_DIR_PORT      GPIOA
-#define MOTOR_DIR_PIN       GPIO4
+#define BOOM_PWR_PORT      GPIOA
+#define BOOM_PWR_PIN       GPIO5
+#define BOOM_DIR_PORT      GPIOA
+#define BOOM_DIR_PIN       GPIO4
+#define BOOM_SIG_PORT      GPIOA
+#define BOOM_SIG_PIN       GPIO11
 
 #define BOOM_CAL_DELTA      10
 
@@ -102,20 +104,30 @@ static uint16_t adc_read(void)
     return reg16;
 }
 
-static void motor_pwr_set(bool on)
+static void boom_signal_set(bool on)
 {
     if (on)
-        gpio_set(MOTOR_PWR_PORT, MOTOR_PWR_PIN);
+        gpio_set(BOOM_SIG_PORT, BOOM_SIG_PIN);
     else
-        gpio_clear(MOTOR_PWR_PORT, MOTOR_PWR_PIN);
+        gpio_clear(BOOM_SIG_PORT, BOOM_SIG_PIN);
+}
+
+static void motor_pwr_set(bool on)
+{
+    boom_signal_set(on);
+
+    if (on)
+        gpio_set(BOOM_PWR_PORT, BOOM_PWR_PIN);
+    else
+        gpio_clear(BOOM_PWR_PORT, BOOM_PWR_PIN);
 }
 
 static void motor_dir_set(bool down)
 {
     if (down)
-        gpio_set(MOTOR_DIR_PORT, MOTOR_DIR_PIN);
+        gpio_set(BOOM_DIR_PORT, BOOM_DIR_PIN);
     else
-        gpio_clear(MOTOR_DIR_PORT, MOTOR_DIR_PIN);
+        gpio_clear(BOOM_DIR_PORT, BOOM_DIR_PIN);
 }
 
 void boom_init()
@@ -123,10 +135,12 @@ void boom_init()
     adc_setup();
 
     /* The relays are open collector */
-    gpio_set_mode(MOTOR_PWR_PORT, GPIO_MODE_OUTPUT_50_MHZ,
-                  GPIO_CNF_OUTPUT_PUSHPULL, MOTOR_PWR_PIN);
-    gpio_set_mode(MOTOR_DIR_PORT, GPIO_MODE_OUTPUT_50_MHZ,
-                  GPIO_CNF_OUTPUT_PUSHPULL, MOTOR_DIR_PIN);
+    gpio_set_mode(BOOM_PWR_PORT, GPIO_MODE_OUTPUT_50_MHZ,
+                  GPIO_CNF_OUTPUT_PUSHPULL, BOOM_PWR_PIN);
+    gpio_set_mode(BOOM_DIR_PORT, GPIO_MODE_OUTPUT_50_MHZ,
+                  GPIO_CNF_OUTPUT_PUSHPULL, BOOM_DIR_PIN);
+    gpio_set_mode(BOOM_SIG_PORT, GPIO_MODE_OUTPUT_50_MHZ,
+                  GPIO_CNF_OUTPUT_PUSHPULL, BOOM_SIG_PIN);
 
 
     timer_set(&g_timer, BOOM_INTERVAL);
@@ -135,6 +149,11 @@ void boom_init()
 void boom_open()
 {
     g_dest = STATE_OPENED;
+}
+
+bool boom_isopen()
+{
+    return g_state == STATE_OPENED;
 }
 
 void boom_close()
@@ -164,6 +183,7 @@ void boom_process()
 
         switch (g_state) {
         case STATE_OPENING:
+            boom_signal_set(true);
             if (adc_read() > g_adc_opened || timer_expired(&g_timeout)) {
                 motor_pwr_set(false);
                 g_state = STATE_OPENED;
