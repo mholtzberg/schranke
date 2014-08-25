@@ -85,7 +85,7 @@ static int g_count = 0;
 static void gsm_write(const char *fmt, ...)
 {
     va_list args;
-    char buf[64];
+    char buf[256];
     const char *p = buf;
     size_t len;
 
@@ -165,21 +165,24 @@ static void gsm_setsched(const char *line)
     }
 }
 
-static void gsm_status(void)
+static void gsm_status(const char *dest)
 {
     static struct gsm_sms sms;
     struct gsm_sms *s;
     struct tm open;
     struct tm close;
 
+    time_t now = rtc_time();
+
     settings_getopen(&open);
     settings_getclose(&close);
 
     memset(&sms, 0, sizeof(sms));
 
-    sniprintf(sms.recipient, sizeof(sms.recipient), "+4917624347476");
-    sniprintf(sms.msg, sizeof(sms.msg), "Status: %s\n"
+    strncpy(sms.recipient, dest, sizeof(sms.recipient));
+    sniprintf(sms.msg, sizeof(sms.msg), "%sStatus: %s\n"
               "Offen von: %02d:%02d bis %02d:%02d",
+              ctime(&now),
               boom_isopen() ? "Auf" : "Zu",
               open.tm_hour, open.tm_min,
               close.tm_hour, close.tm_min);
@@ -365,7 +368,7 @@ void gsm_process()
             } else if (strncasecmp(line, "zu", 2) == 0) {
                 boom_close();
             } else if (strncmp(line, "?", 1) == 0) {
-                gsm_status();
+                gsm_status(sender);
             } else if (strncmp(line, "!", 1) == 0) {
                 rtc_set(mktime(&tm));
                 gsm_setsched(line);
