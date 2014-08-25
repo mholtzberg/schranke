@@ -131,24 +131,29 @@ void gui_init(struct glib_ctx *glib)
 
 void gui_process(void)
 {
+    static uint32_t last = 0;
+
     if (timer_expired(&g_button_timer)) {
         uint32_t buttons = gpio_get(
             BUTTON_PORT, BUTTON_OK | BUTTON_BACK | BUTTON_UP | BUTTON_DOWN);
 
-        if (!(buttons & BUTTON_BACK)) {
-            page_keydown(&g_page_ctx, PAGE_KEY_BACK);
-        }
-        if (!(buttons & BUTTON_OK)) {
-            page_keydown(&g_page_ctx, PAGE_KEY_OK);
-        }
-        if (!(buttons & BUTTON_UP)) {
-            page_keydown(&g_page_ctx, PAGE_KEY_UP);
-        }
+        if (last != buttons) {
+            last = buttons;
 
-        if (!(buttons & BUTTON_DOWN)) {
-            page_keydown(&g_page_ctx, PAGE_KEY_DOWN);
-        }
+            if (!(buttons & BUTTON_BACK)) {
+                page_keydown(&g_page_ctx, PAGE_KEY_BACK);
+            }
+            if (!(buttons & BUTTON_OK)) {
+                page_keydown(&g_page_ctx, PAGE_KEY_OK);
+            }
+            if (!(buttons & BUTTON_UP)) {
+                page_keydown(&g_page_ctx, PAGE_KEY_UP);
+            }
 
+            if (!(buttons & BUTTON_DOWN)) {
+                page_keydown(&g_page_ctx, PAGE_KEY_DOWN);
+            }
+        }
         timer_set(&g_button_timer, BUTTON_TIMEOUT);
     }
 }
