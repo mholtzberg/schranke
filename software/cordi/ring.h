@@ -28,12 +28,12 @@
 
 #include <stdbool.h>
 
-#define RING_SIZE  64
+#define RING_SIZE  256
 
 struct ring {
     int head;
     int tail;
-    char buf[64];
+    char buf[RING_SIZE];
 };
 
 void ring_init(struct ring *ring);
