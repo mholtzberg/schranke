@@ -96,6 +96,8 @@ static void gsm_write(const char *fmt, ...)
 
     buf[len] = '\0';
 
+    USART_CR1(USART2) &= ~USART_CR1_TXEIE;
+
     while (*p != '\0')
         ring_enq(&g_outbuf, *p++);
 
@@ -108,12 +110,16 @@ static const char *gsm_getline(void)
     static unsigned pos = 0;
     int c;
 
+    USART_CR1(GSM_USART) &= ~USART_CR1_RXNEIE;
+
     while ((c = ring_deq(&g_inbuf)) >= 0 && c != '\n') {
         line[pos] = c;
         dbg("%c", c);
         if (++pos >= sizeof(line))
             pos = 0;
     }
+
+    USART_CR1(GSM_USART) |= USART_CR1_RXNEIE;
 
     if (c == '\n') {
         dbg("\n");
@@ -131,6 +137,15 @@ static const char *gsm_getline(void)
     }
 }
 
+static int gsm_getc(void)
+{
+    int ret;
+    USART_CR1(GSM_USART) &= ~USART_CR1_RXNEIE;
+    ret = ring_deq(&g_inbuf);
+    USART_CR1(GSM_USART) |= USART_CR1_RXNEIE;
+    return ret;
+}
+
 static void gsm_setsched(const char *line)
 {
     struct tm open;
@@ -145,7 +160,6 @@ static void gsm_setsched(const char *line)
         settings_setopen(&open);
         settings_setclose(&close);
         settings_save();
-        dbg("saved\n");
     }
 }
 
@@ -153,11 +167,20 @@ static void gsm_status(void)
 {
     static struct gsm_sms sms;
     struct gsm_sms *s;
+    struct tm open;
+    struct tm close;
+
+    settings_getopen(&open);
+    settings_getclose(&close);
 
     memset(&sms, 0, sizeof(sms));
 
     sniprintf(sms.recipient, sizeof(sms.recipient), "+4917624347476");
-    sniprintf(sms.msg, sizeof(sms.msg), "Hallo");
+    sniprintf(sms.msg, sizeof(sms.msg), "Status: %s\n"
+              "Offen von: %02d:%02d bis %02d:%02d",
+              boom_isopen() ? "Auf" : "Zu",
+              open.tm_hour, open.tm_min,
+              close.tm_hour, close.tm_min);
 
     if (g_sms_list == NULL) {
         g_sms_list = &sms;
@@ -344,7 +367,7 @@ void gsm_process()
         break;
 
     case STATE_SENDSMS:
-        if ((c = ring_deq(&g_inbuf)) >= 0 && c == '>') {
+        if ((c = gsm_getc()) >= 0 && c == '>') {
             gsm_write("%s\x1a", g_sms_list->msg);
 
             /* Don't forget to remove from list */
